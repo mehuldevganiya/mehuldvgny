@@ -1,22 +1,14 @@
 import os
 import re
-
-CRON_FILE = 'cronjob.txt'
-TIMESTAMP = "`date +%d-%m-%y.%H:%M`"
-
-# Constants
-MACHINE = 'xpb5f353186wch2.ubslcloud-prod.msad.ubs.net'
-OWNER = 'svc_agv thorprod'
-PERMISSION = 'gx,mx'
-TIMEZONE = 'Europe/Zurich'
-GROUP = 'DP01'
-APPLICATION = '1861_APP_AT5134'
-DESCRIPTION = 'THOR job to run DAO REPORTS feed in PROD. Reach out to DL.TS-ASR-IB-FX-Derivs for any issues.'
+import argparse
+import json
 
 CRON_DAY_TO_AUTOSYS = {
     '0': 'su', '1': 'mo', '2': 'tu', '3': 'we',
     '4': 'th', '5': 'fr', '6': 'sa', '7': 'su'
 }
+
+TIMESTAMP = "`date +%d-%m-%y.%H:%M`"
 
 def expand_day_range(expr):
     if ',' in expr:
@@ -70,7 +62,7 @@ def extract_folder_and_script(command):
 def generate_job_name(folder, script):
     return f"IBIT_THOR_1861_BATCH_{folder}_{script}_P"
 
-def generate_jil(job_name, command, time, log_path, days_of_week):
+def generate_jil(job_name, command, time, log_path, days_of_week, config):
     stdout = f"{log_path}.{TIMESTAMP}.log" if log_path else f"/tmp/{job_name}.{TIMESTAMP}.log"
     stderr = stdout.replace(".log", ".err")
 
@@ -81,24 +73,35 @@ def generate_jil(job_name, command, time, log_path, days_of_week):
 insert_job: {job_name}
 job_type: CMD
 command: "{command}"
-machine: {MACHINE}
-owner: {OWNER}
-permission: {PERMISSION}
+machine: {config['machine']}
+owner: {config['owner']}
+permission: {config['permission']}
 date_conditions: 1
 days_of_week: {days_of_week}
 start_times: {time}
-description: "{DESCRIPTION}"
+description: "{config['description']}"
 std_out_file: "{stdout}"
 std_err_file: "{stderr}"
 alarm_if_fail: 1
 alarm_if_terminated: 1
-timezone: {TIMEZONE}
-group: {GROUP}
-application: {APPLICATION}
+timezone: {config['timezone']}
+group: {config['group']}
+application: {config['application']}
 """
 
+def load_config(path):
+    with open(path, 'r') as f:
+        return json.load(f)
+
 def main():
-    with open(CRON_FILE, 'r') as file:
+    parser = argparse.ArgumentParser(description="Convert cron jobs to AutoSys JILs.")
+    parser.add_argument("cron_file", help="Input cronjob.txt file")
+    parser.add_argument("config_file", help="JSON file with JIL metadata config")
+
+    args = parser.parse_args()
+    config = load_config(args.config_file)
+
+    with open(args.cron_file, 'r') as file:
         lines = [line.strip() for line in file if line.strip()]
 
     for line in lines:
@@ -109,7 +112,7 @@ def main():
         time, command, log_path, days_of_week = parsed
         folder, script = extract_folder_and_script(command)
         job_name = generate_job_name(folder, script)
-        jil = generate_jil(job_name, command, time, log_path, days_of_week)
+        jil = generate_jil(job_name, command, time, log_path, days_of_week, config)
 
         output_filename = f"{job_name}.jil"
         with open(output_filename, 'w') as out_file:
@@ -119,3 +122,18 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+
+
+{
+  "machine": "xpb5f353186wch2.ubslcloud-prod.msad.ubs.net",
+  "owner": "svc_agv thorprod",
+  "permission": "gx,mx",
+  "timezone": "Europe/Zurich",
+  "group": "DP01",
+  "application": "1861_APP_AT5134",
+  "description": "THOR job to run DAO REPORTS feed in PROD. Reach out to DL.TS-ASR-IB-FX-Derivs for any issues."
+}
+
+
+
