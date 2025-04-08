@@ -11,7 +11,7 @@ PERMISSION = 'gx,mx'
 TIMEZONE = 'Europe/Zurich'
 GROUP = 'DP01'
 APPLICATION = '1861_APP_AT5134'
-DESCRIPTION = 'THOR job to run DAO REPORTS feed in PROD. Reach out to DL-TS-ASR-IB-FX-Derivs for any issues.'
+DESCRIPTION = 'THOR job to run DAO REPORTS feed in PROD. Reach out to DL.TS-ASR-IB-FX-Derivs for any issues.'
 
 CRON_DAY_TO_AUTOSYS = {
     '0': 'su', '1': 'mo', '2': 'tu', '3': 'we',
