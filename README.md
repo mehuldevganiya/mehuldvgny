@@ -1,37 +1,79 @@
-# mehuldvgny
-
+import os
 import re
-from datetime import datetime
 
 CRON_FILE = 'cronjob.txt'
-OUTPUT_FILE = 'output.jil'
+TIMESTAMP = "`date +%d-%m-%y.%H:%M`"
 
-JOB_NAME_BASE = 'IBIT_THOR_1861_BATCH_REPORTS_TM_DAO_XLS_P'
-COMMAND_PREFIX = '/sbcimp/dyn/data/Thor/THOR_BATCH/REPORTS/runREPORTS_sftp.ksh'
+# Constants
 MACHINE = 'xpb5f353186wch2.ubslcloud-prod.msad.ubs.net'
 OWNER = 'svc_agv thorprod'
-STDOUT_PATH = '/sbclocal/dyn/logfiles/Thor/Batch'
-STDERR_PATH = '/sbclocal/dyn/logfiles/Thor/Batch'
+PERMISSION = 'gx,mx'
+TIMEZONE = 'Europe/Zurich'
 GROUP = 'DP01'
 APPLICATION = '1861_APP_AT5134'
-TIMEZONE = 'Europe/Zurich'
-DAYS_OF_WEEK = 'mo,tu,we,th,fr'
-PERMISSION = 'gx,mx'
-DESCRIPTION = 'THOR job to run DAO REPORTS feed in PROD. Reach out to DL.TS-ASR-IB-FX-Derivs for any issues.'
+DESCRIPTION = 'THOR job to run DAO REPORTS feed in PROD. Reach out to DL-TS-ASR-IB-FX-Derivs for any issues.'
 
-def cron_to_time(cron_line):
-    match = re.match(r'^(\d+)\s+(\d+)', cron_line)
+CRON_DAY_TO_AUTOSYS = {
+    '0': 'su', '1': 'mo', '2': 'tu', '3': 'we',
+    '4': 'th', '5': 'fr', '6': 'sa', '7': 'su'
+}
+
+def expand_day_range(expr):
+    if ',' in expr:
+        parts = expr.split(',')
+    else:
+        parts = [expr]
+
+    days = []
+    for part in parts:
+        if '-' in part:
+            start, end = map(int, part.split('-'))
+            days.extend(range(start, end + 1))
+        else:
+            days.append(int(part))
+    return sorted(set(days))
+
+def cron_days_to_autosys(dow_field):
+    if dow_field == '*':
+        return 'su,mo,tu,we,th,fr,sa'
+
+    day_nums = expand_day_range(dow_field)
+    return ','.join(CRON_DAY_TO_AUTOSYS[str(d % 7)] for d in day_nums)
+
+def parse_cron_line(line):
+    parts = line.strip().split(None, 5)
+    if len(parts) < 6:
+        return None
+
+    minute, hour, _, _, dow_field = parts[:5]
+    schedule = f"{int(hour):02d}:{int(minute):02d}"
+    days_of_week = cron_days_to_autosys(dow_field)
+
+    command_and_redirect = parts[5]
+    match = re.match(r'(.*?)(?:\s*>\s*(\S+))?$', command_and_redirect)
     if match:
-        minute, hour = match.groups()
-        return f"{int(hour):02d}:{int(minute):02d}"
-    return None
+        command = match.group(1).strip()
+        redirection = match.group(2) if match.group(2) else None
+    else:
+        command = command_and_redirect
+        redirection = None
 
-def extract_command(cron_line):
-    parts = cron_line.split(None, 5)
-    return parts[5].strip() if len(parts) >= 6 else ''
+    return schedule, command, redirection, days_of_week
 
-def generate_jil(job_name, start_times, command):
-    timestamp = "`date +%d-%m-%y.%H:%M`"
+def extract_folder_and_script(command):
+    script_path = command.split()[0]
+    parts = script_path.strip('/').split('/')
+    folder = parts[-2]
+    script = os.path.basename(script_path).replace('.ksh', '')
+    return folder.upper(), script
+
+def generate_job_name(folder, script):
+    return f"IBIT_THOR_1861_BATCH_{folder}_{script}_P"
+
+def generate_jil(job_name, command, time, log_path, days_of_week):
+    stdout = f"{log_path}.{TIMESTAMP}.log" if log_path else f"/tmp/{job_name}.{TIMESTAMP}.log"
+    stderr = stdout.replace(".log", ".err")
+
     return f"""\
 /* ----------------- {job_name} ----------------- */
 /* To insert JIL for the first time to Autosys server use insert_job instead of update_job */
@@ -43,39 +85,37 @@ machine: {MACHINE}
 owner: {OWNER}
 permission: {PERMISSION}
 date_conditions: 1
-days_of_week: {DAYS_OF_WEEK}
-start_times: {",".join(start_times)}
+days_of_week: {days_of_week}
+start_times: {time}
 description: "{DESCRIPTION}"
-std_out_file: "{STDOUT_PATH}/{job_name}.{timestamp}.log"
-std_err_file: "{STDERR_PATH}/{job_name}.{timestamp}.err"
+std_out_file: "{stdout}"
+std_err_file: "{stderr}"
 alarm_if_fail: 1
 alarm_if_terminated: 1
 timezone: {TIMEZONE}
 group: {GROUP}
 application: {APPLICATION}
-
 """
 
 def main():
-    with open(CRON_FILE, 'r') as f:
-        lines = [line.strip() for line in f if line.strip()]
-    
-    job_map = {}
-    
-    for line in lines:
-        time = cron_to_time(line)
-        command = extract_command(line)
-        if command not in job_map:
-            job_map[command] = []
-        job_map[command].append(time)
-    
-    with open(OUTPUT_FILE, 'w') as f:
-        for idx, (cmd, times) in enumerate(job_map.items(), start=1):
-            job_name = JOB_NAME_BASE if len(job_map) == 1 else f"{JOB_NAME_BASE}_{idx}"
-            jil = generate_jil(job_name, times, cmd)
-            f.write(jil + '\n')
+    with open(CRON_FILE, 'r') as file:
+        lines = [line.strip() for line in file if line.strip()]
 
-    print(f"JIL file written to {OUTPUT_FILE}")
+    for line in lines:
+        parsed = parse_cron_line(line)
+        if not parsed:
+            continue
+
+        time, command, log_path, days_of_week = parsed
+        folder, script = extract_folder_and_script(command)
+        job_name = generate_job_name(folder, script)
+        jil = generate_jil(job_name, command, time, log_path, days_of_week)
+
+        output_filename = f"{job_name}.jil"
+        with open(output_filename, 'w') as out_file:
+            out_file.write(jil)
+
+        print(f"[✓] Created: {output_filename}")
 
 if __name__ == '__main__':
     main()
