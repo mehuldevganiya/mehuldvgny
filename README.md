@@ -136,4 +136,31 @@ if __name__ == '__main__':
 }
 
 
+start_mins = ",".join(f"{m:02}" for m in parse_cron_field(minute, 0, 59))
+run_window = convert_to_run_window(hour)
+
+def parse_cron_field(field, min_val, max_val):
+    """Parses cron fields like '0-3,5,7-8' to a sorted set of integers."""
+    result = set()
+    for part in field.split(','):
+        if '-' in part:
+            start, end = map(int, part.split('-'))
+            result.update(range(start, end + 1))
+        else:
+            result.add(int(part))
+    return sorted(v for v in result if min_val <= v <= max_val)
+
+
+def convert_to_run_window(hour_field):
+    ranges = []
+    for part in hour_field.split(','):
+        if '-' in part:
+            start, end = map(int, part.split('-'))
+            ranges.append(f"{start:02}:00-{end:02}:59")
+        else:
+            hour = int(part)
+            ranges.append(f"{hour:02}:00-{hour:02}:59")
+    return ",".join(ranges)
+
+
 
